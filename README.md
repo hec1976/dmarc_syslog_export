@@ -84,7 +84,7 @@ org=(?<org>[^ ]+) report_id=(?<report_id>[^ ]+) domain=(?<domain>[^ ]+) policy=(
 ```
 
 ---
-## 📋 Log-Attribute
+## Log-Attribute
 
 Das Skript generiert für jeden verarbeiteten DMARC-Eintrag eine strukturierte Logzeile mit folgenden Attributen:
 
