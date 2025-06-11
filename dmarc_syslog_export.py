@@ -7,7 +7,14 @@ import logging.handlers
 import configparser
 import os
 import socket
+import argparse
+import json
 from datetime import datetime
+
+# === Argumente (optional) ===
+parser = argparse.ArgumentParser()
+parser.add_argument('--loglevel', default='INFO')
+args = parser.parse_args()
 
 # === Konfiguration einlesen ===
 config = configparser.ConfigParser()
@@ -28,7 +35,7 @@ XML_OUTPUT_DIR = config.get("options", "xml_output_dir", fallback="/tmp/dmarc_xm
 
 # === Logging Setup ===
 logger = logging.getLogger("DMARC")
-logger.setLevel(logging.INFO)
+logger.setLevel(args.loglevel.upper())
 
 socktype = socket.SOCK_STREAM if SYSLOG_PROTO == "tcp" else socket.SOCK_DGRAM
 syslog_handler = logging.handlers.SysLogHandler(address=(SYSLOG_HOST, SYSLOG_PORT), socktype=socktype)
@@ -37,9 +44,9 @@ syslog_handler.setFormatter(formatter)
 logger.addHandler(syslog_handler)
 
 def ensure_mailbox_exists(mail, folder):
-    code, boxes = mail.list()
-    existing_folders = [box.split()[-1].strip('"') for box in boxes if box]
-    if folder not in existing_folders:
+    try:
+        mail.select(folder)
+    except:
         mail.create(folder)
 
 def move_message(mail, msg_id, target_folder):
@@ -53,15 +60,14 @@ def save_xml_to_file(xml_data, report_id):
         date_str = datetime.now().strftime("%Y%m%d")
         filename = f"{date_str}_{report_id}.xml"
         path = os.path.join(XML_OUTPUT_DIR, filename)
-
         with open(path, "w", encoding="utf-8") as f:
             f.write(xml_data)
-
         logger.info(f"[DMARC] XML gespeichert: {path}")
     except Exception as e:
-        logger.error(f"[DMARC] Fehler beim Speichern der XML-Datei: {str(e)}")
+        logger.exception(f"[DMARC] Fehler beim Speichern der XML-Datei: {e}")
 
-def parse_and_log(xml_data):
+def parse_dmarc_report(xml_data):
+    results = []
     try:
         root = ET.fromstring(xml_data)
         org = root.findtext("report_metadata/org_name")
@@ -72,36 +78,34 @@ def parse_and_log(xml_data):
         policy = root.findtext("policy_published/p")
 
         for record in root.findall("record"):
-            ip = record.findtext("row/source_ip")
-            count = record.findtext("row/count")
-            disposition = record.findtext("row/policy_evaluated/disposition")
-            dkim_result = record.findtext("row/policy_evaluated/dkim")
-            spf_result = record.findtext("row/policy_evaluated/spf")
-            header_from = record.findtext("identifiers/header_from")
-
-            dkim_domain = record.findtext("auth_results/dkim/domain")
-            dkim_eval = record.findtext("auth_results/dkim/result")
-            spf_domain = record.findtext("auth_results/spf/domain")
-            spf_eval = record.findtext("auth_results/spf/result")
-
-            log_line = (
-                f"[DMARC] org={org} report_id={report_id} domain={domain} "
-                f"policy={policy} ip={ip} count={count} disposition={disposition} "
-                f"dkim={dkim_result} spf={spf_result} header_from={header_from} "
-                f"begin={begin} end={end} "
-                f"dkim_domain={dkim_domain} dkim_result={dkim_eval} "
-                f"spf_domain={spf_domain} spf_result={spf_eval}"
-            )
-            logger.info(log_line)
-
-        if SAVE_XML and report_id:
-            save_xml_to_file(xml_data, report_id)
-
-        return True
+            result = {
+                "org": org,
+                "report_id": report_id,
+                "domain": domain,
+                "policy": policy,
+                "begin": begin,
+                "end": end,
+                "ip": record.findtext("row/source_ip"),
+                "count": record.findtext("row/count"),
+                "disposition": record.findtext("row/policy_evaluated/disposition"),
+                "dkim": record.findtext("row/policy_evaluated/dkim"),
+                "spf": record.findtext("row/policy_evaluated/spf"),
+                "header_from": record.findtext("identifiers/header_from"),
+                "dkim_domain": record.findtext("auth_results/dkim/domain"),
+                "dkim_result": record.findtext("auth_results/dkim/result"),
+                "spf_domain": record.findtext("auth_results/spf/domain"),
+                "spf_result": record.findtext("auth_results/spf/result")
+            }
+            results.append(result)
+        return results, report_id
 
     except Exception as e:
-        logger.error(f"[DMARC] Fehler beim Parsen: {str(e)}")
-        return False
+        logger.exception(f"[DMARC] Fehler beim Parsen von XML: {e}")
+        return [], None
+
+def log_dmarc_records(records):
+    for rec in records:
+        logger.info(f"[DMARC] {json.dumps(rec)}")
 
 def process_dmarc_reports():
     mail = imaplib.IMAP4_SSL(IMAP_HOST)
@@ -114,7 +118,6 @@ def process_dmarc_reports():
             typ, msg_data = mail.fetch(num, "(RFC822)")
             raw_email = msg_data[0][1]
             msg = email.message_from_bytes(raw_email)
-
             processed = False
 
             for part in msg.walk():
@@ -123,25 +126,25 @@ def process_dmarc_reports():
                     continue
 
                 if filename.endswith(".xml") or filename.endswith(".xml.gz"):
-                    payload = part.get_payload(decode=True)
-                    if filename.endswith(".gz"):
-                        try:
-                            payload = gzip.decompress(payload)
-                        except:
-                            continue
                     try:
+                        payload = part.get_payload(decode=True)
+                        if filename.endswith(".gz"):
+                            payload = gzip.decompress(payload)
                         xml_text = payload.decode("utf-8")
-                        success = parse_and_log(xml_text)
-                        if success:
+                        records, report_id = parse_dmarc_report(xml_text)
+                        if records:
+                            log_dmarc_records(records)
+                            if SAVE_XML and report_id:
+                                save_xml_to_file(xml_text, report_id)
                             processed = True
                     except Exception as e:
-                        logger.error(f"[DMARC] Fehler beim Dekodieren von {filename}: {str(e)}")
+                        logger.exception(f"[DMARC] Fehler beim Verarbeiten von {filename}: {e}")
 
             if processed and IMAP_ARCHIVE:
                 move_message(mail, num, IMAP_ARCHIVE)
 
         except Exception as e:
-            logger.error(f"[DMARC] Fehler bei Verarbeitung der Mail {num}: {str(e)}")
+            logger.exception(f"[DMARC] Fehler bei Mail-ID {num}: {e}")
 
     mail.expunge()
     mail.logout()
