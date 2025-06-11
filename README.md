@@ -6,12 +6,12 @@ Dieses Tool liest automatisch **DMARC-Aggregatberichte** (XML/XML.GZ) per IMAP a
 
 ## Features
 
-- 📬 IMAP-Zugriff auf DMARC-Postfach (`UNSEEN`-Mails)
-- 📤 Syslog-Ausgabe (TCP oder UDP) an zentrales Logsystem
-- 🗂️ Verschieben verarbeiteter Mails in IMAP-Archivordner
-- 🧾 Lokales Speichern der XML-Berichte (optional)
-- 🕵️ Erweiterte Felder für Splunk: Zeitraum, DKIM/SPF-Ergebnisse
-- 🗺️ Geeignet für GeoIP-Analysen in Splunk
+- IMAP-Zugriff auf DMARC-Postfach (`UNSEEN`-Mails)
+- Syslog-Ausgabe (TCP oder UDP) an zentrales Logsystem
+- Verschieben verarbeiteter Mails in IMAP-Archivordner
+- Lokales Speichern der XML-Berichte (optional)
+- Erweiterte Felder für Splunk: Zeitraum, DKIM/SPF-Ergebnisse
+- Geeignet für GeoIP-Analysen in Splunk
 
 ---
 
@@ -25,19 +25,19 @@ Dieses Tool liest automatisch **DMARC-Aggregatberichte** (XML/XML.GZ) per IMAP a
 
 ## Installation
 
-\\`\\`\\bash  
-git clone https://github.com/deinbenutzer/dmarc-syslog-export.git  
+```bash  
+git clone https://github.com/hec1976/dmarc-syslog-export.git  
 cd dmarc-syslog-export  
 python3 -m venv venv  
 source venv/bin/activate  
 pip install -r requirements.txt  
-\\`\\`\\`
+```
 
 ---
 
 ## Konfiguration (`config.ini`)
 
-\\`\\`\\`ini  
+```ini  
 [imap]  
 host = imap.example.com  
 user = dmarc@example.com  
@@ -53,23 +53,23 @@ protocol = tcp  ; oder udp
 [options]  
 save_xml = true  
 xml_output_dir = /var/log/dmarc/reports  
-\\`\\`\\`
+```
 
 ---
 
 ## Ausführung
 
-\\`\\`\\`bash  
+```bash  
 python3 dmarc_syslog_export.py  
-\\`\\`\\`
+```
 
 ---
 
 ## Beispiel-Logausgabe
 
-\\`\\`\\`text  
+```text  
 DMARC: [DMARC] org=google report_id=123456 domain=example.com policy=reject ip=203.0.113.15 count=12 disposition=reject dkim=fail spf=fail header_from=example.com begin=1718044800 end=1718131200 dkim_domain=gmail.com dkim_result=fail spf_domain=google.com spf_result=fail  
-\\`\\`\\`
+```
 
 ---
 
@@ -79,26 +79,26 @@ DMARC: [DMARC] org=google report_id=123456 domain=example.com policy=reject ip=2
 - Nutze `sourcetype = dmarc:report`
 - Empfohlene Field Extraction (Regulärer Ausdruck):
 
-\\`\\`\\`regex  
+```regex  
 org=(?<org>[^ ]+) report_id=(?<report_id>[^ ]+) domain=(?<domain>[^ ]+) policy=(?<policy>[^ ]+) ip=(?<ip>[^ ]+) count=(?<count>\d+) disposition=(?<disposition>[^ ]+) dkim=(?<dkim>[^ ]+) spf=(?<spf>[^ ]+) header_from=(?<header_from>[^ ]+) begin=(?<begin>\d+) end=(?<end>\d+) dkim_domain=(?<dkim_domain>[^ ]+) dkim_result=(?<dkim_result>[^ ]+) spf_domain=(?<spf_domain>[^ ]+) spf_result=(?<spf_result>[^ ]+)  
-\\`\\`\\`
+```
 
 ---
 
 ## Automatischer Betrieb via systemd
 
 **`/etc/systemd/system/dmarc-parser.service`**  
-\\`\\`\\`ini  
+```ini  
 [Unit]  
 Description=DMARC Syslog Export  
 
 [Service]  
 WorkingDirectory=/opt/dmarc-syslog-export  
 ExecStart=/usr/bin/python3 dmarc_syslog_export.py  
-\\`\\`\\`
+```
 
 **`/etc/systemd/system/dmarc-parser.timer`**  
-\\`\\`\\`ini  
+```ini  
 [Unit]  
 Description=Run DMARC parser every hour  
 
@@ -108,24 +108,24 @@ OnUnitActiveSec=1h
 
 [Install]  
 WantedBy=timers.target  
-\\`\\`\\`
+```
 
 Aktivieren:
 
-\\`\\`\\`bash  
+```bash  
 sudo systemctl enable --now dmarc-parser.timer  
-\\`\\`\\`
+```
 
 ---
 
 ## Projektstruktur
 
-\\`\\`\\`text  
+```text  
 dmarc_syslog_export/  
 ├── dmarc_syslog_export.py  
 ├── config.ini  
 └── README.md  
-\\`\\`\\`
+```
 
 ---
 
