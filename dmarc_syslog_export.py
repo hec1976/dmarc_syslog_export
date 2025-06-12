@@ -5,6 +5,7 @@ import zipfile
 import tarfile
 import io
 import xml.etree.ElementTree as ET
+from xml.etree.ElementTree import ParseError
 import logging
 import logging.handlers
 import configparser
@@ -38,31 +39,35 @@ SYSLOG_PROTO = config.get("syslog", "protocol", fallback="tcp").lower()
 SAVE_JSON = config.getboolean("options", "save_json", fallback=True)
 XML_OUTPUT_DIR = config.get("options", "xml_output_dir", fallback="/tmp/dmarc_xml")
 DAYS_TO_KEEP = config.getint("options", "days_to_keep", fallback=7)
+DRY_RUN = config.getboolean("options", "dry_run", fallback=False)
 
 # === Logging Setup ===
 logger = logging.getLogger("DMARC")
 logger.setLevel(args.loglevel.upper())
+formatter = logging.Formatter('%(name)s: %(message)s')
 
 if SYSLOG_ENABLED:
     socktype = socket.SOCK_STREAM if SYSLOG_PROTO == "tcp" else socket.SOCK_DGRAM
     syslog_handler = logging.handlers.SysLogHandler(address=(SYSLOG_HOST, SYSLOG_PORT), socktype=socktype)
-    formatter = logging.Formatter('%(name)s: %(message)s')
     syslog_handler.setFormatter(formatter)
     logger.addHandler(syslog_handler)
 
+if config.getboolean("logging", "enable_file", fallback=False):
+    file_path = config.get("logging", "file_path", fallback="dmarc_parser.log")
+    file_handler = logging.FileHandler(file_path)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
 def ensure_mailbox_exists(mail, folder):
     try:
         mail.select(folder)
-    except:
+    except Exception:
         mail.create(folder)
-
 
 def move_message(mail, msg_id, target_folder):
     ensure_mailbox_exists(mail, target_folder)
     mail.copy(msg_id, target_folder)
     mail.store(msg_id, '+FLAGS', '\\Deleted')
-
 
 def parse_dmarc_report(xml_data):
     results = []
@@ -97,10 +102,22 @@ def parse_dmarc_report(xml_data):
             results.append(result)
         return results
 
+    except ParseError as e:
+        logger.error(f"[DMARC] Ungültiges XML-Format: {e}")
     except Exception as e:
         logger.exception(f"[DMARC] Fehler beim Parsen von XML: {e}")
+    return []
+
+def load_existing_json(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
         return []
 
+def write_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
 def append_to_daily_json(records):
     try:
@@ -108,20 +125,12 @@ def append_to_daily_json(records):
         date_str = datetime.now().strftime("%Y%m%d")
         filename = f"{date_str}_all.json"
         path = os.path.join(XML_OUTPUT_DIR, filename)
-        data = []
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                try:
-                    data = json.load(f)
-                except:
-                    data = []
+        data = load_existing_json(path)
         data.extend(records)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        write_json(path, data)
         logger.info(f"[DMARC] Tages-JSON aktualisiert: {path}")
     except Exception as e:
         logger.exception(f"[DMARC] Fehler beim Schreiben der JSON-Datei: {e}")
-
 
 def cleanup_old_reports():
     now = time.time()
@@ -138,6 +147,8 @@ def cleanup_old_reports():
         except Exception as e:
             logger.error(f"[DMARC] Fehler beim Löschen von {fname}: {e}")
 
+def is_supported_archive(filename):
+    return any(filename.endswith(ext) for ext in [".gz", ".zip", ".tgz", ".tar.gz"])
 
 def extract_xml_from_archive(filename, payload):
     xml_list = []
@@ -161,7 +172,6 @@ def extract_xml_from_archive(filename, payload):
         logger.error(f"[DMARC] Fehler beim Entpacken von {filename}: {e}")
     return xml_list
 
-
 def process_dmarc_reports():
     mail = imaplib.IMAP4_SSL(IMAP_HOST)
     mail.login(IMAP_USER, IMAP_PASS)
@@ -181,25 +191,24 @@ def process_dmarc_reports():
                     continue
                 payload = part.get_payload(decode=True)
 
-                if filename.lower().endswith((".gz", ".zip", ".tgz", ".tar.gz")):
+                if is_supported_archive(filename):
                     xml_texts = extract_xml_from_archive(filename, payload)
                     for xml_text in xml_texts:
-                        if "<feedback>" in xml_text and "<report_metadata>" in xml_text:
-                            records = parse_dmarc_report(xml_text)
-                            if records and SAVE_JSON:
-                                append_to_daily_json(records)
-                                processed = True
+                        records = parse_dmarc_report(xml_text)
+                        if records and SAVE_JSON and not DRY_RUN:
+                            append_to_daily_json(records)
+                            processed = True
                 elif filename.lower().endswith(".xml"):
                     try:
                         xml_text = payload.decode("utf-8")
                         records = parse_dmarc_report(xml_text)
-                        if records and SAVE_JSON:
+                        if records and SAVE_JSON and not DRY_RUN:
                             append_to_daily_json(records)
                             processed = True
                     except Exception as e:
                         logger.exception(f"[DMARC] Fehler beim Verarbeiten von {filename}: {e}")
 
-            if processed and IMAP_ARCHIVE:
+            if processed and IMAP_ARCHIVE and not DRY_RUN:
                 move_message(mail, num, IMAP_ARCHIVE)
 
         except Exception as e:
@@ -207,8 +216,9 @@ def process_dmarc_reports():
 
     mail.expunge()
     mail.logout()
-    cleanup_old_reports()
-
+    if not DRY_RUN:
+        cleanup_old_reports()
+    logger.info("[DMARC] Verarbeitung abgeschlossen.")
 
 if __name__ == "__main__":
     process_dmarc_reports()
