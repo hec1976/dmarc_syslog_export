@@ -17,8 +17,8 @@ import time
 from datetime import datetime
 
 # === Argumente (optional) ===
-parser = argparse.ArgumentParser()
-parser.add_argument('--loglevel', default='INFO')
+parser = argparse.ArgumentParser(description='DMARC-Parser: verarbeitet Reports via IMAP oder lokale Datei')
+parser.add_argument('--loglevel', default='INFO', help='Logging-Level (z. B. INFO, DEBUG)')
 parser.add_argument('--file', help='Lokale Datei zur Verarbeitung (.xml, .zip, .gz, .tgz, .tar.gz)')
 args = parser.parse_args()
 
@@ -250,10 +250,6 @@ def process_dmarc_reports():
     if not DRY_RUN:
         cleanup_old_reports()
     logger_script.info("[DMARC] Verarbeitung abgeschlossen.")
-
-# === Erweiterung: Argument --file hinzufügen ===
-parser.add_argument('--file', help='Lokale Datei zur Verarbeitung (.xml, .zip, .gz, .tgz, .tar.gz)')
-args = parser.parse_args()
 
 # === Hauptlogik ===
 if __name__ == "__main__":
