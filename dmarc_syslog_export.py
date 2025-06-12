@@ -40,23 +40,34 @@ SAVE_JSON = config.getboolean("options", "save_json", fallback=True)
 XML_OUTPUT_DIR = config.get("options", "xml_output_dir", fallback="/tmp/dmarc_xml")
 DAYS_TO_KEEP = config.getint("options", "days_to_keep", fallback=7)
 DRY_RUN = config.getboolean("options", "dry_run", fallback=False)
+LOG_RECORDS = config.getboolean("options", "log_records", fallback=True)
 
-# === Logging Setup ===
-logger = logging.getLogger("DMARC")
-logger.setLevel(args.loglevel.upper())
-formatter = logging.Formatter('%(name)s: %(message)s')
+# === Zwei getrennte Logger ===
+logger_script = logging.getLogger("DMARC_SCRIPT")
+logger_script.setLevel(args.loglevel.upper())
 
-if SYSLOG_ENABLED:
-    socktype = socket.SOCK_STREAM if SYSLOG_PROTO == "tcp" else socket.SOCK_DGRAM
-    syslog_handler = logging.handlers.SysLogHandler(address=(SYSLOG_HOST, SYSLOG_PORT), socktype=socktype)
-    syslog_handler.setFormatter(formatter)
-    logger.addHandler(syslog_handler)
+logger_data = logging.getLogger("DMARC_DATA")
+logger_data.setLevel(logging.INFO)
 
+formatter_script = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+formatter_syslog = logging.Formatter('DMARC: %(message)s')
+
+# === File Logging für Script-Protokollierung ===
 if config.getboolean("logging", "enable_file", fallback=False):
     file_path = config.get("logging", "file_path", fallback="dmarc_parser.log")
     file_handler = logging.FileHandler(file_path)
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+    file_handler.setFormatter(formatter_script)
+    logger_script.addHandler(file_handler)
+
+# === Syslog Logging für strukturierte DMARC-Daten ===
+if SYSLOG_ENABLED:
+    try:
+        socktype = socket.SOCK_STREAM if SYSLOG_PROTO == "tcp" else socket.SOCK_DGRAM
+        syslog_handler = logging.handlers.SysLogHandler(address=(SYSLOG_HOST, SYSLOG_PORT), socktype=socktype)
+        syslog_handler.setFormatter(formatter_syslog)
+        logger_data.addHandler(syslog_handler)
+    except Exception as e:
+        logger_script.error(f"[DMARC] Fehler beim Einrichten des Syslog-Handlers: {e}")
 
 def ensure_mailbox_exists(mail, folder):
     try:
@@ -103,10 +114,21 @@ def parse_dmarc_report(xml_data):
         return results
 
     except ParseError as e:
-        logger.error(f"[DMARC] Ungültiges XML-Format: {e}")
+        logger_script.error(f"[DMARC] Ungültiges XML-Format: {e}")
     except Exception as e:
-        logger.exception(f"[DMARC] Fehler beim Parsen von XML: {e}")
+        logger_script.exception(f"[DMARC] Fehler beim Parsen von XML: {e}")
     return []
+
+def log_record_to_syslog(record):
+    log_line = (
+        f"org={record['org']} report_id={record['report_id']} domain={record['domain']} "
+        f"policy={record['policy']} ip={record['ip']} count={record['count']} "
+        f"disposition={record['disposition']} dkim={record['dkim']} spf={record['spf']} "
+        f"header_from={record['header_from']} begin={record['begin']} end={record['end']} "
+        f"dkim_domain={record['dkim_domain']} dkim_result={record['dkim_result']} "
+        f"spf_domain={record['spf_domain']} spf_result={record['spf_result']}"
+    )
+    logger_data.info(log_line)
 
 def load_existing_json(path):
     try:
@@ -128,9 +150,9 @@ def append_to_daily_json(records):
         data = load_existing_json(path)
         data.extend(records)
         write_json(path, data)
-        logger.info(f"[DMARC] Tages-JSON aktualisiert: {path}")
+        logger_script.info(f"[DMARC] Tages-JSON aktualisiert: {path}")
     except Exception as e:
-        logger.exception(f"[DMARC] Fehler beim Schreiben der JSON-Datei: {e}")
+        logger_script.exception(f"[DMARC] Fehler beim Schreiben der JSON-Datei: {e}")
 
 def cleanup_old_reports():
     now = time.time()
@@ -143,9 +165,9 @@ def cleanup_old_reports():
         try:
             if os.path.getmtime(path) < cutoff:
                 os.remove(path)
-                logger.info(f"[DMARC] Alte Datei gelöscht: {fname}")
+                logger_script.info(f"[DMARC] Alte Datei gelöscht: {fname}")
         except Exception as e:
-            logger.error(f"[DMARC] Fehler beim Löschen von {fname}: {e}")
+            logger_script.error(f"[DMARC] Fehler beim Löschen von {fname}: {e}")
 
 def is_supported_archive(filename):
     return any(filename.endswith(ext) for ext in [".gz", ".zip", ".tgz", ".tar.gz"])
@@ -169,7 +191,7 @@ def extract_xml_from_archive(filename, payload):
                         if f:
                             xml_list.append(f.read().decode("utf-8"))
     except Exception as e:
-        logger.error(f"[DMARC] Fehler beim Entpacken von {filename}: {e}")
+        logger_script.error(f"[DMARC] Fehler beim Entpacken von {filename}: {e}")
     return xml_list
 
 def process_dmarc_reports():
@@ -195,30 +217,38 @@ def process_dmarc_reports():
                     xml_texts = extract_xml_from_archive(filename, payload)
                     for xml_text in xml_texts:
                         records = parse_dmarc_report(xml_text)
-                        if records and SAVE_JSON and not DRY_RUN:
-                            append_to_daily_json(records)
+                        if records:
+                            if LOG_RECORDS and not DRY_RUN:
+                                for r in records:
+                                    log_record_to_syslog(r)
+                            if SAVE_JSON and not DRY_RUN:
+                                append_to_daily_json(records)
                             processed = True
                 elif filename.lower().endswith(".xml"):
                     try:
                         xml_text = payload.decode("utf-8")
                         records = parse_dmarc_report(xml_text)
-                        if records and SAVE_JSON and not DRY_RUN:
-                            append_to_daily_json(records)
+                        if records:
+                            if LOG_RECORDS and not DRY_RUN:
+                                for r in records:
+                                    log_record_to_syslog(r)
+                            if SAVE_JSON and not DRY_RUN:
+                                append_to_daily_json(records)
                             processed = True
                     except Exception as e:
-                        logger.exception(f"[DMARC] Fehler beim Verarbeiten von {filename}: {e}")
+                        logger_script.exception(f"[DMARC] Fehler beim Verarbeiten von {filename}: {e}")
 
             if processed and IMAP_ARCHIVE and not DRY_RUN:
                 move_message(mail, num, IMAP_ARCHIVE)
 
         except Exception as e:
-            logger.exception(f"[DMARC] Fehler bei Mail-ID {num}: {e}")
+            logger_script.exception(f"[DMARC] Fehler bei Mail-ID {num}: {e}")
 
     mail.expunge()
     mail.logout()
     if not DRY_RUN:
         cleanup_old_reports()
-    logger.info("[DMARC] Verarbeitung abgeschlossen.")
+    logger_script.info("[DMARC] Verarbeitung abgeschlossen.")
 
 if __name__ == "__main__":
     process_dmarc_reports()
