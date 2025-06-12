@@ -67,7 +67,7 @@ dry_run = false
 
 ---
 
-##  Ausführung
+## Ausführung
 
 ```bash
 python3 dmarc_syslog_export.py --loglevel INFO
@@ -75,6 +75,26 @@ python3 dmarc_syslog_export.py --loglevel INFO
 
 ---
 
+## 🔍 Offline-Test mit XML- oder Archivdateien
+
+Du kannst das Skript auch **ohne IMAP-Zugriff** nutzen, um einzelne DMARC-Reports (z. B. `.xml`, `.zip`, `.gz`, `.tar.gz`) lokal zu testen. Ideal für Debugging, Testdaten oder Entwicklung.
+
+### Unterstützte Dateiformate
+
+- `.xml` – reine XML-Dateien mit DMARC-Daten  
+- `.zip` – ZIP-Archive mit einer oder mehreren XML-Dateien  
+- `.gz` – gzip-komprimierte Einzel-XML  
+- `.tar.gz` / `.tgz` – Tarball mit mehreren XML-Dateien
+
+### Verhalten bei Nutzung von `--file`:
+
+- **Kein IMAP-Login** erforderlich
+- Die Reports werden wie gewohnt verarbeitet:
+  - **Syslog-Ausgabe** (sofern aktiviert)
+  - **JSON-Speicherung** (sofern aktiviert)
+- Bestehende Konfiguration in `config.ini` wird berücksichtigt (z. B. `dry_run`, `xml_output_dir`)
+
+---
 ## Beispiel-Logausgabe
 
 ```text
