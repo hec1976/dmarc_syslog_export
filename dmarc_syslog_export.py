@@ -250,44 +250,49 @@ def process_dmarc_reports():
         cleanup_old_reports()
     logger_script.info("[DMARC] Verarbeitung abgeschlossen.")
 
+# === Erweiterung: Argument --file hinzufügen ===
+parser.add_argument('--file', help='Lokale Datei zur Verarbeitung (.xml, .zip, .gz, .tgz, .tar.gz)')
+args = parser.parse_args()
+
+# === Hauptlogik ===
 if __name__ == "__main__":
     if args.file:
-    try:
-        filename = args.file
-        if not os.path.exists(filename):
-            logger_script.error(f"[DMARC] Datei nicht gefunden: {filename}")
-            exit(1)
+        try:
+            filename = args.file
+            if not os.path.exists(filename):
+                logger_script.error(f"[DMARC] Datei nicht gefunden: {filename}")
+                exit(1)
 
-        with open(filename, "rb") as f:
-            payload = f.read()
+            with open(filename, "rb") as f:
+                payload = f.read()
 
-        xml_list = []
+            xml_list = []
 
-        if filename.lower().endswith(".xml"):
-            xml_list = [payload.decode("utf-8")]
-        elif is_supported_archive(filename):
-            xml_list = extract_xml_from_archive(filename, payload)
-        else:
-            logger_script.error(f"[DMARC] Nicht unterstütztes Dateiformat: {filename}")
-            exit(1)
+            if filename.lower().endswith(".xml"):
+                xml_list = [payload.decode("utf-8")]
+            elif is_supported_archive(filename):
+                xml_list = extract_xml_from_archive(filename, payload)
+            else:
+                logger_script.error(f"[DMARC] Nicht unterstütztes Dateiformat: {filename}")
+                exit(1)
 
-        total_records = 0
-        for xml in xml_list:
-            records = parse_dmarc_report(xml)
-            if records:
-                total_records += len(records)
-                if LOG_RECORDS and not DRY_RUN:
-                    for r in records:
-                        log_record_to_syslog(r)
-                if SAVE_JSON and not DRY_RUN:
-                    append_to_daily_json(records)
+            total_records = 0
+            for xml in xml_list:
+                records = parse_dmarc_report(xml)
+                if records:
+                    total_records += len(records)
+                    if LOG_RECORDS and not DRY_RUN:
+                        for r in records:
+                            log_record_to_syslog(r)
+                    if SAVE_JSON and not DRY_RUN:
+                        append_to_daily_json(records)
 
-        if total_records > 0:
-            logger_script.info(f"[DMARC] {total_records} Datensätze aus {filename} verarbeitet.")
-        else:
-            logger_script.warning(f"[DMARC] Keine gültigen DMARC-Daten in {filename} gefunden.")
+            if total_records > 0:
+                logger_script.info(f"[DMARC] {total_records} Datensätze aus {filename} verarbeitet.")
+            else:
+                logger_script.warning(f"[DMARC] Keine gültigen DMARC-Daten in {filename} gefunden.")
 
-    except Exception as e:
-        logger_script.exception(f"[DMARC] Fehler beim Verarbeiten der Datei {args.file}: {e}")
-else:
-    process_dmarc_reports()
+        except Exception as e:
+            logger_script.exception(f"[DMARC] Fehler beim Verarbeiten der Datei {args.file}: {e}")
+    else:
+        process_dmarc_reports()
