@@ -19,6 +19,7 @@ from datetime import datetime
 # === Argumente (optional) ===
 parser = argparse.ArgumentParser()
 parser.add_argument('--loglevel', default='INFO')
+parser.add_argument('--file', help='Lokale Datei zur Verarbeitung (.xml, .zip, .gz, .tgz, .tar.gz)')
 args = parser.parse_args()
 
 # === Konfiguration einlesen ===
