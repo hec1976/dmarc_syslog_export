@@ -18,7 +18,7 @@ Dieses Tool verarbeitet automatisch **DMARC-Aggregatberichte** (XML oder gezippt
 
 ## Voraussetzungen
 
-- Python 3.x
+- Python 3.6 oder neuer (empfohlen: 3.8+)
 - Zugriff auf ein IMAP-Postfach mit DMARC-Reports
 - Netzwerkzugang zum Syslog-Zielsystem (z. B. Splunk, rsyslog, syslog-ng)
 
