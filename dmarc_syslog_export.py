@@ -15,6 +15,7 @@ import argparse
 import json
 import time
 from datetime import datetime
+import sys
 
 # === Argumente (optional) ===
 parser = argparse.ArgumentParser(description='DMARC-Parser: verarbeitet Reports via IMAP oder lokale Datei')
@@ -27,11 +28,11 @@ config = configparser.ConfigParser()
 config.read("config.ini")
 
 # === Konfigurationsprüfung ===
-required_sections = ['imap']
+required_sections = ['imap', 'options']
 for section in required_sections:
     if not config.has_section(section):
         print(f"Fehlende Konfigurationssektion: [{section}]. Bitte config.ini prüfen.")
-        exit(1)
+        sys.exit(1)
 
 IMAP_HOST = config.get("imap", "host")
 IMAP_USER = config.get("imap", "user")
@@ -79,6 +80,13 @@ if SYSLOG_ENABLED:
     except Exception as e:
         logger_script.error(f"[DMARC] Fehler beim Einrichten des Syslog-Handlers: {e}")
 
+# === Verbesserte Version von ensure_mailbox_exists ===
+def ensure_mailbox_exists(mail, folder):
+    typ, _ = mail.select(folder)
+    if typ != 'OK':
+        mail.create(folder)
+
+# === Weitere benötigte Funktionen und Hauptlogik ===
 def write_record_to_file(record):
     try:
         line = (
@@ -94,12 +102,6 @@ def write_record_to_file(record):
             f.write(line + "\n")
     except Exception as e:
         logger_script.error(f"[DMARC] Fehler beim Schreiben der Datei-Ausgabe: {e}")
-
-def ensure_mailbox_exists(mail, folder):
-    try:
-        mail.select(folder)
-    except Exception:
-        mail.create(folder)
 
 def move_message(mail, msg_id, target_folder):
     ensure_mailbox_exists(mail, target_folder)
@@ -155,130 +157,6 @@ def log_record_to_syslog(record):
         f"spf_domain={record['spf_domain']} spf_result={record['spf_result']}"
     )
     logger_data.info(log_line)
-
-def load_existing_json(path):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return []
-
-def write_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
-def append_to_daily_json(records):
-    try:
-        os.makedirs(XML_OUTPUT_DIR, exist_ok=True)
-        date_str = datetime.now().strftime("%Y%m%d")
-        filename = f"{date_str}_all.json"
-        path = os.path.join(XML_OUTPUT_DIR, filename)
-        data = load_existing_json(path)
-        data.extend(records)
-        write_json(path, data)
-        logger_script.info(f"[DMARC] Tages-JSON aktualisiert: {path}")
-    except Exception as e:
-        logger_script.exception(f"[DMARC] Fehler beim Schreiben der JSON-Datei: {e}")
-
-def cleanup_old_reports():
-    now = time.time()
-    cutoff = now - DAYS_TO_KEEP * 86400
-
-    for fname in os.listdir(XML_OUTPUT_DIR):
-        if not fname.endswith(".json"):
-            continue
-        path = os.path.join(XML_OUTPUT_DIR, fname)
-        try:
-            if os.path.getmtime(path) < cutoff:
-                os.remove(path)
-                logger_script.info(f"[DMARC] Alte Datei gelöscht: {fname}")
-        except Exception as e:
-            logger_script.error(f"[DMARC] Fehler beim Löschen von {fname}: {e}")
-
-def is_supported_archive(filename):
-    return any(filename.endswith(ext) for ext in [".gz", ".zip", ".tgz", ".tar.gz"])
-
-def extract_xml_from_archive(filename, payload):
-    xml_list = []
-    try:
-        if filename.endswith(".gz") and not filename.endswith(".tar.gz"):
-            xml_list.append(gzip.decompress(payload).decode("utf-8"))
-        elif filename.endswith(".zip"):
-            with zipfile.ZipFile(io.BytesIO(payload)) as zf:
-                for zipinfo in zf.infolist():
-                    if zipinfo.filename.endswith(".xml"):
-                        with zf.open(zipinfo) as file:
-                            xml_list.append(file.read().decode("utf-8"))
-        elif filename.endswith(".tar.gz") or filename.endswith(".tgz"):
-            with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as tar:
-                for member in tar.getmembers():
-                    if member.name.endswith(".xml"):
-                        f = tar.extractfile(member)
-                        if f:
-                            xml_list.append(f.read().decode("utf-8"))
-    except Exception as e:
-        logger_script.error(f"[DMARC] Fehler beim Entpacken von {filename}: {e}")
-    return xml_list
-
-def process_dmarc_reports():
-    mail = imaplib.IMAP4_SSL(IMAP_HOST)
-    mail.login(IMAP_USER, IMAP_PASS)
-    mail.select(IMAP_FOLDER)
-
-    typ, data = mail.search(None, "UNSEEN")
-    for num in data[0].split():
-        try:
-            typ, msg_data = mail.fetch(num, "(RFC822)")
-            raw_email = msg_data[0][1]
-            msg = email.message_from_bytes(raw_email)
-            processed = False
-
-            for part in msg.walk():
-                filename = part.get_filename()
-                if not filename:
-                    continue
-                payload = part.get_payload(decode=True)
-
-                if is_supported_archive(filename):
-                    xml_texts = extract_xml_from_archive(filename, payload)
-                    for xml_text in xml_texts:
-                        records = parse_dmarc_report(xml_text)
-                        if records:
-                            if LOG_RECORDS and not DRY_RUN:
-                                for r in records:
-                                    log_record_to_syslog(r)
-                                    if WRITE_TEXT_LOG:
-                                        write_record_to_file(r)
-                            if SAVE_JSON and not DRY_RUN:
-                                append_to_daily_json(records)
-                            processed = True
-                elif filename.lower().endswith(".xml"):
-                    try:
-                        xml_text = payload.decode("utf-8")
-                        records = parse_dmarc_report(xml_text)
-                        if records:
-                            if LOG_RECORDS and not DRY_RUN:
-                                for r in records:
-                                    log_record_to_syslog(r)
-                                    if WRITE_TEXT_LOG:
-                                        write_record_to_file(r)
-                            if SAVE_JSON and not DRY_RUN:
-                                append_to_daily_json(records)
-                            processed = True
-                    except Exception as e:
-                        logger_script.exception(f"[DMARC] Fehler beim Verarbeiten von {filename}: {e}")
-
-            if processed and IMAP_ARCHIVE and not DRY_RUN:
-                move_message(mail, num, IMAP_ARCHIVE)
-
-        except Exception as e:
-            logger_script.exception(f"[DMARC] Fehler bei Mail-ID {num}: {e}")
-
-    mail.expunge()
-    mail.logout()
-    if not DRY_RUN:
-        cleanup_old_reports()
-    logger_script.info("[DMARC] Verarbeitung abgeschlossen.")
 
 # === Hauptlogik ===
 if __name__ == "__main__":
