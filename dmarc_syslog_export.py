@@ -42,6 +42,8 @@ XML_OUTPUT_DIR = config.get("options", "xml_output_dir", fallback="/tmp/dmarc_xm
 DAYS_TO_KEEP = config.getint("options", "days_to_keep", fallback=7)
 DRY_RUN = config.getboolean("options", "dry_run", fallback=False)
 LOG_RECORDS = config.getboolean("options", "log_records", fallback=True)
+WRITE_TEXT_LOG = config.getboolean("options", "write_text_log", fallback=False)
+TEXT_LOG_PATH = config.get("options", "text_log_path", fallback="dmarc_data.log")
 
 # === Zwei getrennte Logger ===
 logger_script = logging.getLogger("DMARC_SCRIPT")
@@ -69,6 +71,22 @@ if SYSLOG_ENABLED:
         logger_data.addHandler(syslog_handler)
     except Exception as e:
         logger_script.error(f"[DMARC] Fehler beim Einrichten des Syslog-Handlers: {e}")
+
+def write_record_to_file(record):
+    try:
+        line = (
+            f"{datetime.now().isoformat()} | "
+            f"org={record['org']} | report_id={record['report_id']} | domain={record['domain']} | "
+            f"policy={record['policy']} | ip={record['ip']} | count={record['count']} | "
+            f"disposition={record['disposition']} | dkim={record['dkim']} | spf={record['spf']} | "
+            f"header_from={record['header_from']} | "
+            f"dkim_domain={record['dkim_domain']} | dkim_result={record['dkim_result']} | "
+            f"spf_domain={record['spf_domain']} | spf_result={record['spf_result']}"
+        )
+        with open(TEXT_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception as e:
+        logger_script.error(f"[DMARC] Fehler beim Schreiben der Datei-Ausgabe: {e}")
 
 def ensure_mailbox_exists(mail, folder):
     try:
@@ -222,6 +240,8 @@ def process_dmarc_reports():
                             if LOG_RECORDS and not DRY_RUN:
                                 for r in records:
                                     log_record_to_syslog(r)
+                                    if WRITE_TEXT_LOG:
+                                        write_record_to_file(r)
                             if SAVE_JSON and not DRY_RUN:
                                 append_to_daily_json(records)
                             processed = True
@@ -233,6 +253,8 @@ def process_dmarc_reports():
                             if LOG_RECORDS and not DRY_RUN:
                                 for r in records:
                                     log_record_to_syslog(r)
+                                    if WRITE_TEXT_LOG:
+                                        write_record_to_file(r)
                             if SAVE_JSON and not DRY_RUN:
                                 append_to_daily_json(records)
                             processed = True
@@ -281,6 +303,8 @@ if __name__ == "__main__":
                     if LOG_RECORDS and not DRY_RUN:
                         for r in records:
                             log_record_to_syslog(r)
+                            if WRITE_TEXT_LOG:
+                                write_record_to_file(r)
                     if SAVE_JSON and not DRY_RUN:
                         append_to_daily_json(records)
 
