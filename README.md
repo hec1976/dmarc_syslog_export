@@ -14,6 +14,7 @@ Dieses Tool verarbeitet automatisch **DMARC-Aggregatberichte** (XML oder gezippt
 - Archivierung verarbeiteter Mails in IMAP-Zielordner (optional)
 - Automatische Bereinigung alter JSON-Dateien (konfigurierbar)
 - Dry-Run-Modus zur sicheren Testausführung
+- Unterstützung von Log-Rotation über `logrotate`
 
 ---
 
@@ -68,6 +69,32 @@ log_records = true          ; DMARC-Datensätze verarbeiten und loggen?
 write_text_log = true       ; DMARC-Datensätze zusätzlich in Textdatei schreiben
 text_log_path = dmarc_data.log ; Pfad zur Textdatei (falls write_text_log aktiv)
 ```
+
+---
+
+## Log-Rotation (`logrotate` Beispiel für Textdatei)
+
+Wenn `write_text_log = true` gesetzt ist, wird `dmarc_data.log` kontinuierlich beschrieben. Um ein unbegrenztes Wachstum zu verhindern, verwende `logrotate`:
+
+```bash
+sudo nano /etc/logrotate.d/dmarc_data
+```
+
+```conf
+/var/log/dmarc/dmarc_data.log {
+    daily
+    rotate 14
+    compress
+    missingok
+    notifempty
+    create 640 root adm
+    postrotate
+        systemctl reload dmarc-parser.service > /dev/null 2>&1 || true
+    endscript
+}
+```
+
+> Passe den Pfad zu deiner `text_log_path`-Datei an. `rotate 14` bedeutet: 14 Tage aufbewahren.
 
 ---
 
