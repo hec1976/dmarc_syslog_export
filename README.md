@@ -43,30 +43,30 @@ pip install -r requirements.txt
 
 ```ini
 [imap]
-host = imap.example.com
-user = dmarc@example.com
-password = geheim
-folder = INBOX
-archive_folder = Processed
+host = imap.example.com     ; IMAP-Server für den Abruf der Reports
+user = dmarc@example.com    ; Benutzername
+password = geheim           ; Passwort (verwende möglichst App-Passwort)
+folder = INBOX              ; Quellordner (Standard: INBOX)
+archive_folder = Processed  ; Zielordner für verarbeitete Mails (optional)
 
 [syslog]
-enable = true
-host = syslog.example.com
-port = 514
-protocol = udp
+enable = true               ; Aktiviert Syslog-Ausgabe (true/false)
+host = syslog.example.com   ; Syslog-Zielhost
+port = 514                  ; Syslog-Port
+protocol = udp              ; Protokoll: udp oder tcp
 
 [logging]
-enable_file = true
-file_path = dmarc_parser.log
+enable_file = true          ; Script-Log in Datei schreiben (true/false)
+file_path = dmarc_parser.log; Pfad zur Logdatei des Skripts
 
 [options]
-save_json = true
-xml_output_dir = /var/log/dmarc/reports
-days_to_keep = 7
-dry_run = false
-log_records = true
-write_text_log = true
-text_log_path = dmarc_data.log
+save_json = true            ; Berichte als JSON-Dateien speichern
+xml_output_dir = /var/log/dmarc/reports ; Zielverzeichnis für JSON
+days_to_keep = 7            ; Anzahl Tage zur Aufbewahrung der JSON-Dateien
+dry_run = false             ; Keine Änderungen durchführen (nur Testlauf)
+log_records = true          ; DMARC-Datensätze verarbeiten und loggen?
+write_text_log = true       ; DMARC-Datensätze zusätzlich in Textdatei schreiben
+text_log_path = dmarc_data.log ; Pfad zur Textdatei (falls write_text_log aktiv)
 ```
 
 ---
