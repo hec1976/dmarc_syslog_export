@@ -26,6 +26,13 @@ args = parser.parse_args()
 config = configparser.ConfigParser()
 config.read("config.ini")
 
+# === Konfigurationsprüfung ===
+required_sections = ['imap']
+for section in required_sections:
+    if not config.has_section(section):
+        print(f"Fehlende Konfigurationssektion: [{section}]. Bitte config.ini prüfen.")
+        exit(1)
+
 IMAP_HOST = config.get("imap", "host")
 IMAP_USER = config.get("imap", "user")
 IMAP_PASS = config.get("imap", "password")
@@ -33,8 +40,8 @@ IMAP_FOLDER = config.get("imap", "folder", fallback="INBOX")
 IMAP_ARCHIVE = config.get("imap", "archive_folder", fallback=None)
 
 SYSLOG_ENABLED = config.getboolean("syslog", "enable", fallback=True)
-SYSLOG_HOST = config.get("syslog", "host")
-SYSLOG_PORT = config.getint("syslog", "port")
+SYSLOG_HOST = config.get("syslog", "host", fallback="localhost")
+SYSLOG_PORT = config.getint("syslog", "port", fallback=514)
 SYSLOG_PROTO = config.get("syslog", "protocol", fallback="tcp").lower()
 
 SAVE_JSON = config.getboolean("options", "save_json", fallback=True)
